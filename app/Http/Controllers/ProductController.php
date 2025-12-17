@@ -21,41 +21,27 @@ class ProductController extends Controller
 
     public function store(Request $request)
     {
-
-        $validatedData = $request->validate([
-            'name' => 'required|string|max:20',
-            'price' => 'required|numeric',
-            'description' => 'nullable|string',
-        ]);
-
-        $product = Product::create($validatedData);
-
         return response()->json([
             "status" => "success",
-            "data" => $product,
+            "data" => Product::create($request),
             "message" => "Product created successfully"
         ], 201);
     }
-    public function show(string $id)
-    {
 
+
+    public function show(Product $id)
+    {
         return response()->json([
             "status" => "success",
-            "data" => Product::find($id),
+            "data" => $id,
             "message" => "Product retrieved successfully"
         ]);
     }
 
-    public function update(Request $request, string $id)
+    public function update(Request $storeProducto, Product $id)
     {
-        $product = Product::findOrFail($id);
-        $validatedData = $request->validate([
-            'name' => 'sometimes|required|string|max:20',
-            'price' => 'sometimes|required|numeric',
-            'description' => 'nullable|string',
-        ]);
-        $product->update($validatedData);
-
+        $product = $id;
+        $product->update($storeProducto);
         return response()->json([
             "status" => "success",
             "data" => $product,
