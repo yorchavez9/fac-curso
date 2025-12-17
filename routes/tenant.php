@@ -20,12 +20,10 @@ use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 |
 */
 
-// Rutas API para tenants (identificadas por header X-Tenant o dominio)
+// Rutas API para tenants (identificadas por header X-Tenant)
 Route::middleware([
     'api',
     InitializeTenancyByRequestData::class, // Identifica tenant por header X-Tenant
-    // O usa InitializeTenancyByDomain::class para identificar por dominio
-    PreventAccessFromCentralDomains::class,
 ])->prefix('api')->group(function () {
 
     // Rutas públicas del tenant (sin autenticación)
@@ -44,6 +42,8 @@ Route::middleware([
 
         Route::post('/logout', [AuthUserController::class, 'logout']);
         Route::apiResource('users', AuthUserController::class);
-        Route::apiResource('products', ProductController::class);
+        Route::middleware('plan')->group(function () {
+            Route::apiResource('products', ProductController::class);
+        });
     });
 });

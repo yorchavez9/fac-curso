@@ -463,7 +463,7 @@ use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 Route::middleware([
     'api',
     InitializeTenancyByRequestData::class, // Identifica tenant por header X-Tenant
-    PreventAccessFromCentralDomains::class,
+    // Nota: NO usar PreventAccessFromCentralDomains cuando se usa identificación por header
 ])->prefix('api')->group(function () {
 
     // Rutas públicas del tenant
@@ -870,6 +870,12 @@ php artisan tenants:migrate --tenants=abc123-def456-ghi789
 php artisan tenants:seed
 ```
 
+### Ejecutar seeders en un tenant específico
+
+```bash
+php artisan tenants:seed --tenants=abc123-def456-ghi789
+```
+
 ### Listar todos los tenants
 
 ```bash
@@ -880,6 +886,232 @@ php artisan tenants:list
 
 ```bash
 php artisan tenants:run "db:seed --class=UserSeeder" --tenants=abc123-def456-ghi789
+```
+
+---
+
+## Seeders para Tenants
+
+Los seeders permiten poblar automáticamente las bases de datos de los tenants con datos de prueba.
+
+### Crear Seeders para Tenants
+
+#### 1. TenantUserSeeder
+
+Crea el archivo `database/seeders/TenantUserSeeder.php`:
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\User;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+
+class TenantUserSeeder extends Seeder
+{
+    public function run(): void
+    {
+        // Usuario administrador del tenant
+        User::create([
+            'name' => 'Admin Usuario',
+            'email' => 'admin@tenant.com',
+            'password' => Hash::make('password123'),
+        ]);
+
+        // Usuario regular del tenant
+        User::create([
+            'name' => 'Usuario Regular',
+            'email' => 'user@tenant.com',
+            'password' => Hash::make('password123'),
+        ]);
+
+        // Crear usuarios adicionales con factory (si existe)
+        if (class_exists(\Database\Factories\UserFactory::class)) {
+            User::factory(5)->create();
+        }
+    }
+}
+```
+
+#### 2. TenantProductSeeder
+
+Crea el archivo `database/seeders/TenantProductSeeder.php`:
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Product;
+use Illuminate\Database\Seeder;
+
+class TenantProductSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $products = [
+            [
+                'name' => 'Laptop Dell Inspiron',
+                'price' => 899.99,
+                'description' => 'Laptop de alto rendimiento',
+            ],
+            [
+                'name' => 'Mouse Logitech MX Master 3',
+                'price' => 99.99,
+                'description' => 'Mouse ergonómico inalámbrico',
+            ],
+            // ... más productos
+        ];
+
+        foreach ($products as $product) {
+            Product::create($product);
+        }
+    }
+}
+```
+
+#### 3. TenantDatabaseSeeder (Seeder Principal)
+
+Crea el archivo `database/seeders/TenantDatabaseSeeder.php`:
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+
+class TenantDatabaseSeeder extends Seeder
+{
+    /**
+     * Este seeder se ejecuta automáticamente cuando se crea un nuevo tenant
+     */
+    public function run(): void
+    {
+        $this->call([
+            TenantUserSeeder::class,
+            TenantProductSeeder::class,
+        ]);
+    }
+}
+```
+
+### Configurar Seeders Automáticos
+
+#### 1. Actualizar TenancyServiceProvider
+
+Edita `app/Providers/TenancyServiceProvider.php` (línea 30):
+
+```php
+Events\TenantCreated::class => [
+    JobPipeline::make([
+        Jobs\CreateDatabase::class,
+        Jobs\MigrateDatabase::class,
+        Jobs\SeedDatabase::class, // Habilitar seeding automático
+    ])->send(function (Events\TenantCreated $event) {
+        return $event->tenant;
+    })->shouldBeQueued(false),
+],
+```
+
+#### 2. Configurar el Seeder en config/tenancy.php
+
+Edita `config/tenancy.php` (línea 196):
+
+```php
+'seeder_parameters' => [
+    '--class' => 'TenantDatabaseSeeder', // Seeder específico para tenants
+    // '--force' => true, // Habilitar en producción
+],
+```
+
+### Uso de Seeders
+
+#### Seeding Automático
+
+Cuando creas un nuevo tenant, los seeders se ejecutan automáticamente:
+
+```http
+POST http://localhost:8000/api/tenants
+Content-Type: application/json
+
+{
+    "domain": "nueva_empresa",
+    "data": {
+        "name": "Nueva Empresa SA"
+    }
+}
+```
+
+El tenant se crea con:
+- ✅ Base de datos creada
+- ✅ Migraciones ejecutadas
+- ✅ **Seeders ejecutados automáticamente**
+- ✅ Usuarios de prueba: `admin@tenant.com` y `user@tenant.com`
+- ✅ 10 productos de ejemplo
+
+#### Seeding Manual
+
+Ejecutar seeders en un tenant específico:
+
+```bash
+php artisan tenants:seed --tenants=abc123-def456-ghi789
+```
+
+Ejecutar seeders en todos los tenants:
+
+```bash
+php artisan tenants:seed
+```
+
+### Verificar Seeders
+
+Después de crear un tenant, puedes hacer login con los usuarios de prueba:
+
+```http
+POST http://localhost:8000/api/login
+Content-Type: application/json
+X-Tenant: {tenant_id}
+
+{
+    "email": "admin@tenant.com",
+    "password": "password123"
+}
+```
+
+Y verificar los productos:
+
+```http
+GET http://localhost:8000/api/products
+Authorization: Bearer {token}
+X-Tenant: {tenant_id}
+```
+
+### Personalizar Seeders
+
+Puedes personalizar los seeders según tus necesidades:
+
+1. **Agregar más seeders**: Crea nuevos seeders y agrégalos a `TenantDatabaseSeeder`
+2. **Datos específicos por tenant**: Usa los datos del tenant para personalizar el seeding
+3. **Seeders condicionales**: Ejecuta seeders solo si se cumplen ciertas condiciones
+
+Ejemplo de seeding condicional:
+
+```php
+public function run(): void
+{
+    $tenant = tenant();
+
+    if ($tenant->data['plan'] === 'premium') {
+        // Crear datos premium
+        User::factory(20)->create();
+    } else {
+        // Crear datos básicos
+        User::factory(5)->create();
+    }
+}
 ```
 
 ---
